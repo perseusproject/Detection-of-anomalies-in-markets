@@ -7,6 +7,9 @@ def create_returns_matrix(tickers, period="30d", interval="1h"):
     """
     Creates a matrix X_t of hourly log-returns for a basket of assets.
     X_t is of shape n x T, where n is the number of assets and T is the number of observations.
+
+    returns : pandas.DataFrame
+        DataFrame containing the log-returns matrix with assets as columns and timestamps as index.
     """
     # print(f"\n--- Creating Returns Matrix for {tickers} over last {period} ({interval} interval) ---")
     all_hourly_returns = {}
