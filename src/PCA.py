@@ -1,9 +1,15 @@
 import pandas as pd
 import numpy as np
 from numpy.linalg import svd
+import matplotlib.pyplot as plt
+
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler, RobustScaler
+from sklearn.decomposition import PCA
+from sklearn.covariance import MinCovDet
 
 
-def perform_pca_on_svd(matrix: pd.DataFrame, n_components: int = None):
+def perform_pca(matrix: pd.DataFrame, n_components: int = None):
     """
     Performs PCA on a matrix using its SVD decomposition.
 
@@ -42,16 +48,43 @@ def perform_pca_on_svd(matrix: pd.DataFrame, n_components: int = None):
 
 def robust_pca(matrix: pd.DataFrame, n_components: int = None):
     """
-    Performs robust PCA on a matrix using SVD. It means splitting the matrix into low-rank and sparse components.
+    Performs robust PCA on a matrix using a robust estimator and splits the matrix into low-rank and sparse components.
 
     Args:
         matrix (pd.DataFrame): The input matrix (e.g., returns matrix).
-        n_components (int, optional): The number of principal components to keep.
+        n_components (int, optional): The number of principal components to keep for the low-rank part.
                                        If None, all components are kept.
 
     Returns:
         tuple: A tuple containing:
-            - pd.DataFrame: The low-rank component (principal components).
-            - pd.DataFrame: The sparse component (anomalies).
-            - np.array: The singular values (related to explained variance).
+            - pd.DataFrame: The low-rank component.
+            - pd.DataFrame: The sparse component (residuals/anomalies).
+            - np.array: The singular values from the PCA of the robustly scaled data.
     """
+    # 1. Robustly scale the data
+    scaler = RobustScaler()
+    scaled_matrix_np = scaler.fit_transform(matrix)
+    scaled_matrix = pd.DataFrame(
+        scaled_matrix_np, index=matrix.index, columns=matrix.columns)
+
+    # 2. Perform PCA on the robustly scaled data
+    pca = PCA(n_components=n_components)
+
+    # Fit PCA and transform the scaled data to get the scores (low-rank representation)
+    scores_scaled_np = pca.fit_transform(scaled_matrix)
+
+    # Reconstruct the low-rank component in the scaled space
+    low_rank_scaled_np = pca.inverse_transform(scores_scaled_np)
+
+    # Inverse transform to get the low-rank component in the original data scale
+    low_rank_component = pd.DataFrame(scaler.inverse_transform(low_rank_scaled_np),
+                                      index=matrix.index,
+                                      columns=matrix.columns)
+
+    # 3. Calculate the sparse component as the residual
+    sparse_component = matrix - low_rank_component
+
+    # Singular values from the PCA
+    singular_values = pca.singular_values_
+
+    return low_rank_component, sparse_component, singular_values

@@ -6,6 +6,9 @@ from price_downloader import get_daily_prices, get_hourly_prices
 from clean_data import clean_data
 from returns import calculate_log_returns, normalize_series_rolling_zscore
 from create_matrix import create_returns_matrix
+import matplotlib.pyplot as plt
+import seaborn as sns
+from PCA import perform_pca, robust_pca
 
 
 # Define a list of ticker symbols
@@ -32,7 +35,7 @@ for ticker in tickers:
     # print(f"\n--- Hourly Price Data (last 30 days) for {ticker} ---")
     hourly_data = get_hourly_prices(
         ticker_symbol=ticker,
-        period="30d",  # Max 60 days for 1h interval
+        period="7d",  # Last week as per objective
         interval="1h",
         output_filename=os.path.join(
             os.getcwd(), "price_downloader", f"{ticker}_hourly_prices.csv")
@@ -107,7 +110,7 @@ for ticker in tickers:
 
 # Call the function to create the returns matrix
 returns_matrix_Xt = create_returns_matrix(
-    tickers, period="30d", interval="1h")
+    tickers, period="7d", interval="1h")
 
 if not returns_matrix_Xt.empty:
     # You can save this matrix to a file if needed
@@ -115,3 +118,29 @@ if not returns_matrix_Xt.empty:
     print("\nReturns matrix X_t saved to price_downloader/returns_matrix_Xt.csv")
 else:
     print("\nCould not create returns matrix X_t.")
+
+# Perform robust PCA on the returns matrix
+
+
+if not returns_matrix_Xt.empty:
+    # Perform robust PCA on the returns matrix, specifying n_components for a low-rank approximation
+    # Setting n_components to a value less than the full rank will ensure a non-zero sparse component.
+    # For a matrix of shape (n_assets, n_observations), n_components should be less than n_assets.
+    low_rank_component, sparse_component, singular_values = robust_pca(
+        returns_matrix_Xt, n_components=2)
+
+    # Plot anomalous elements (sparse component) as a heatmap
+    print("\n--- Plotting Anomalous Elements (Sparse Component) Heatmap ---")
+    plt.figure(figsize=(12, 8))
+
+    # Fill any NaN values in the sparse_component with 0 before plotting
+    # This is necessary because heatmap cannot plot 'object' dtype (which pd.NA can cause)
+    sparse_component_filled = sparse_component.fillna(0)
+
+    sns.heatmap(sparse_component_filled, cmap='viridis',
+                cbar_kws={'label': 'Anomaly Magnitude'})
+    plt.title('Heatmap of Anomalous Elements (Sparse Component)')
+    plt.xlabel('Assets')
+    plt.ylabel('Time')
+    plt.tight_layout()
+    plt.show()
