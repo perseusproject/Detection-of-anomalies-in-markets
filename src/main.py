@@ -9,21 +9,32 @@ from create_matrix import create_returns_matrix
 import matplotlib.pyplot as plt
 import seaborn as sns
 from PCA import perform_pca, robust_pca
-
+from backtester import strategy, run_backtest  # Import run_backtest
 
 # Define a list of ticker symbols
-tickers = ["AAPL", "MSFT", "AMZN", "NVDA", "TSLA"]
+tickers = ["AAPL", "MSFT", "AMZN", "GOOGL", "META"]
+
+# Define period and interval for hourly data
+period = "30d"  # As specified in the original prompt
+interval = "1h"  # Changed to 1h as 1m has data limitations for yfinance over 7d
 
 # Define start and end dates for daily data
 end_date_daily = datetime.now().strftime('%Y-%m-%d')
 start_date_daily = (datetime.now() - timedelta(days=365)
                     ).strftime('%Y-%m-%d')  # Last 1 year
 
+# --- Data Fetching and Initial Processing ---
+print("\n--- fStarting Data Fetching and Initial Processing ---")
+
+# Dictionary to store processed hourly data for each ticker
+all_processed_hourly_data = {}
+
 for ticker in tickers:
-    # print(f"\n--- Processing Data for {ticker} ---")
+    print(f"\n--- Processing Data for {ticker} ---")
 
     # --- Get Daily Prices ---
-    # print(f"\n--- Daily Price Data for {ticker} ---")
+    # Daily prices are fetched but not used in subsequent steps for this anomaly detection.
+    # They are saved to CSV by get_daily_prices.
     daily_data = get_daily_prices(
         ticker_symbol=ticker,
         start_date=start_date_daily,
@@ -31,86 +42,88 @@ for ticker in tickers:
         output_filename=os.path.join(
             os.getcwd(), "price_downloader", f"{ticker}_daily_prices.csv")
     )
+    if daily_data.empty:
+        print(
+            f"Warning: No daily data fetched for {ticker}. Skipping daily data processing.")
+
     # --- Get Hourly Prices ---
-    # print(f"\n--- Hourly Price Data (last 30 days) for {ticker} ---")
+    # get_hourly_prices now returns a cleaned DataFrame directly.
     hourly_data = get_hourly_prices(
         ticker_symbol=ticker,
-        period="7d",  # Last week as per objective
-        interval="1h",
+        period=period,
+        interval=interval,
         output_filename=os.path.join(
             os.getcwd(), "price_downloader", f"{ticker}_hourly_prices.csv")
     )
-# print("\nAll data fetching complete. Check the 'price_downloader' directory for CSV files.")
 
-# --- Data Processing ---
-# print("\n--- Starting Data Processing ---")
-
-for ticker in tickers:
-    # print(f"\n--- Processing Hourly Data for {ticker} ---")
-    hourly_file_path = f"price_downloader/{ticker}_hourly_prices.csv"
-    try:
-
-        # Load hourly data
-        hourly_data = pd.read_csv(
-            hourly_file_path, index_col=0, parse_dates=True, date_format='%Y-%m-%d %H:%M:%S')
-        # print(f"Loaded {len(hourly_data)} hourly records for {ticker}.")
-
-        # Ensure 'Close' column is numeric
-        if 'Close' in hourly_data.columns:
-            hourly_data['Close'] = pd.to_numeric(
-                hourly_data['Close'], errors='coerce')
-            # print(f"Converted 'Close' column to numeric for {ticker}.")
-        else:
-            print(
-                f"Warning: 'Close' column not found in raw data for {ticker}.")
-
-        # 1. Cleaning
-        cleaned_hourly_data = clean_data(hourly_data.copy())
-
-        # 2. Calculate Log-Returns
-        # Ensure 'Close' column exists after cleaning
-        if 'Close' in cleaned_hourly_data.columns:
-            log_returns = calculate_log_returns(
-                cleaned_hourly_data.copy(), price_column='Close')
-            cleaned_hourly_data['Log_Returns'] = log_returns
-            # print(f"Log-returns calculated for {ticker}.")
-        else:
-            print(
-                f"Warning: 'Close' column not found in cleaned data for {ticker}. Skipping log-return calculation.")
-            # Add column with NA if not found
-            cleaned_hourly_data['Log_Returns'] = pd.NA
-
-        # 3. Normalization of Log-Returns
-        if 'Log_Returns' in cleaned_hourly_data.columns and not cleaned_hourly_data['Log_Returns'].dropna().empty:
-            normalized_log_returns = normalize_series_rolling_zscore(
-                cleaned_hourly_data['Log_Returns'].dropna(), window=20)
-            cleaned_hourly_data['Normalized_Log_Returns'] = normalized_log_returns
-            # print(f"Normalized log-returns calculated for {ticker}.")
-        else:
-            print(
-                f"Warning: No valid Log_Returns to normalize for {ticker}.")
-            # Add column with NA if not found
-            cleaned_hourly_data['Normalized_Log_Returns'] = pd.NA
-
-        # Save processed data
-        processed_output_filename = f"price_downloader/{ticker}_processed_hourly_prices.csv"
-        cleaned_hourly_data.to_csv(processed_output_filename)
-        # print(f"Processed hourly data saved to {processed_output_filename}")
-
-        # print(f"\nFirst 5 processed hourly records for {ticker}:")
-        # print(cleaned_hourly_data.head())
-
-    except FileNotFoundError:
+    if hourly_data.empty:
         print(
-            f"Error: Hourly data file not found for {ticker} at {hourly_file_path}. Skipping processing.")
-    except Exception as e:
-        print(f"Error processing hourly data for {ticker}: {e}")
+            f"Warning: No hourly data fetched for {ticker}. Skipping hourly data processing.")
+        continue  # Skip to next ticker if no hourly data
 
-# print("\n--- All Data Processing Complete ---")
+    # print(f"\n--- Processing Hourly Data for {ticker} ---")
+
+    # Flatten MultiIndex columns if present (e.g., from yfinance output)
+    if isinstance(hourly_data.columns, pd.MultiIndex):
+        hourly_data.columns = hourly_data.columns.droplevel(1)
+        hourly_data.columns.name = None  # Remove the MultiIndex name
+
+    # Ensure 'Close' column is numeric
+    if 'Close' in hourly_data.columns:
+        hourly_data['Close'] = pd.to_numeric(
+            hourly_data['Close'], errors='coerce')
+        # Drop rows where 'Close' price is NaN after conversion
+        hourly_data.dropna(subset=['Close'], inplace=True)
+    else:
+        print(
+            f"Warning: 'Close' column not found in raw data for {ticker}. Skipping further processing for this ticker.")
+        continue  # Skip to next ticker if no 'Close' column
+
+    # 1. Cleaning (additional cleaning if needed, get_hourly_prices already does some)
+    # clean_data function can handle further general cleaning like ffill/bfill
+    cleaned_hourly_data = clean_data(hourly_data.copy())
+
+    # 2. Calculate Log-Returns
+    if 'Close' in cleaned_hourly_data.columns:
+        log_returns = calculate_log_returns(
+            cleaned_hourly_data.copy(), price_column='Close')
+        cleaned_hourly_data['Log_Returns'] = log_returns
+    else:
+        print(
+            f"Warning: 'Close' column not found in cleaned data for {ticker}. Skipping log-return calculation.")
+        cleaned_hourly_data['Log_Returns'] = pd.NA
+
+    # 3. Normalization of Log-Returns
+    if 'Log_Returns' in cleaned_hourly_data.columns and not cleaned_hourly_data['Log_Returns'].dropna().empty:
+        normalized_log_returns = normalize_series_rolling_zscore(
+            cleaned_hourly_data['Log_Returns'].dropna(), window=20)
+        cleaned_hourly_data['Normalized_Log_Returns'] = normalized_log_returns
+    else:
+        print(
+            f"Warning: No valid Log_Returns to normalize for {ticker}.")
+        cleaned_hourly_data['Normalized_Log_Returns'] = pd.NA
+
+    # Make the index timezone-naive before saving and passing to other functions
+    if cleaned_hourly_data.index.tz is not None:
+        cleaned_hourly_data.index = cleaned_hourly_data.index.tz_localize(None)
+
+    # Save processed data
+    processed_output_filename = f"price_downloader/{ticker}_processed_hourly_prices.csv"
+    # Ensure the index is named 'datetime' and save it with that label
+    cleaned_hourly_data.index.name = 'datetime'
+    cleaned_hourly_data.to_csv(
+        processed_output_filename, index_label='datetime')
+    # print(f"Processed hourly data saved to {processed_output_filename}")
+
+    # Store processed data for matrix creation
+    all_processed_hourly_data[ticker] = cleaned_hourly_data
+
+print("\n--- All Data Fetching and Initial Processing Complete ---")
 
 # Call the function to create the returns matrix
+# Pass the dictionary of processed dataframes instead of re-reading from CSVs
 returns_matrix_Xt = create_returns_matrix(
-    tickers, period="7d", interval="1h")
+    tickers, period=period, interval=interval, processed_data=all_processed_hourly_data)
 
 if not returns_matrix_Xt.empty:
     # You can save this matrix to a file if needed
@@ -127,7 +140,7 @@ if not returns_matrix_Xt.empty:
     # Setting n_components to a value less than the full rank will ensure a non-zero sparse component.
     # For a matrix of shape (n_assets, n_observations), n_components should be less than n_assets.
     low_rank_component, sparse_component, singular_values = robust_pca(
-        returns_matrix_Xt, n_components=2)
+        returns_matrix_Xt, n_components=1)
 
     # Plot anomalous elements (sparse component) as a heatmap
     print("\n--- Plotting Anomalous Elements (Sparse Component) Heatmap ---")
@@ -137,10 +150,45 @@ if not returns_matrix_Xt.empty:
     # This is necessary because heatmap cannot plot 'object' dtype (which pd.NA can cause)
     sparse_component_filled = sparse_component.fillna(0)
 
-    sns.heatmap(sparse_component_filled, cmap='viridis',
-                cbar_kws={'label': 'Anomaly Magnitude'})
-    plt.title('Heatmap of Anomalous Elements (Sparse Component)')
-    plt.xlabel('Assets')
-    plt.ylabel('Time')
-    plt.tight_layout()
-    plt.show()
+    # sns.heatmap(sparse_component_filled, cmap='viridis',
+    #             cbar_kws={'label': 'Anomaly Magnitude'})
+    # plt.title('Heatmap of Anomalous Elements (Sparse Component)')
+    # plt.xlabel('Assets')
+    # plt.ylabel('Time')
+    # plt.tight_layout()
+
+    # # Define filename for heatmap
+    # heatmap_filename = os.path.join("Figures", f"{period}{interval}HM.png")
+
+    # # Check if the heatmap file already exists before saving
+    # if not os.path.exists(heatmap_filename):
+    #     plt.savefig(heatmap_filename)
+    #     print(f"Heatmap saved to {heatmap_filename}")
+    # else:
+    #     print(
+    #         f"Heatmap file already exists at {heatmap_filename}, skipping save.")
+
+    # plt.show()
+
+    # --- Run Backtest ---
+    # Select the first ticker for backtesting as an example
+    backtest_ticker = tickers[0]
+    backtest_asset_index = 0  # Corresponds to the first ticker in the list
+
+    print(f"\n--- Initiating Backtest for {backtest_ticker} ---")
+
+    # Generate strategy signals for the specific asset for inspection
+    # This is a duplicate call to strategy, but for debugging purposes.
+    # The actual signals passed to run_backtest are generated inside run_backtest.
+    # We need to ensure the signals generated here match what's expected.
+    debug_signals = strategy(
+        returns_matrix_Xt, sparse_component, backtest_asset_index)
+
+    run_backtest(
+        ticker_symbol=backtest_ticker,
+        period=period,
+        interval=interval,
+        returns_matrix=returns_matrix_Xt,
+        sparse_component=sparse_component,
+        asset_index=backtest_asset_index
+    )

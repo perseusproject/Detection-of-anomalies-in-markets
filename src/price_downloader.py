@@ -26,9 +26,24 @@ def get_daily_prices(ticker_symbol, start_date, end_date, output_filename=None):
         if not data.empty:
             # print(f"Successfully fetched {len(data)} daily records for {ticker_symbol}.")
             if output_filename:
-                data.to_csv(output_filename)
+                # Ensure the index is named 'datetime'
+                data.index.name = 'datetime'
+                # Reset index to make 'datetime' a regular column for cleaning
+                data_to_save = data.reset_index()
+
+                # Filter out rows where 'datetime' column contains 'Ticker' or 'datetime' strings
+                data_to_save = data_to_save[~data_to_save['datetime'].astype(
+                    str).isin(['Ticker', 'datetime'])]
+
+                # Convert 'datetime' column to datetime objects and set as index
+                data_to_save['datetime'] = pd.to_datetime(
+                    data_to_save['datetime'], errors='coerce', utc=True)
+                data_to_save = data_to_save.set_index('datetime')
+                # Save the cleaned DataFrame to CSV with the datetime index
+                data_to_save.to_csv(
+                    output_filename, index=True, index_label='datetime')
                 # print(f"Daily prices saved to {output_filename}")
-            return data
+            return data_to_save  # Return the cleaned data
         else:
             # print(f"No daily data found for {ticker_symbol} in the specified range.")
             return pd.DataFrame()
@@ -59,9 +74,24 @@ def get_hourly_prices(ticker_symbol, period="7d", interval="1h", output_filename
         if not data.empty:
             # print(f"Successfully fetched {len(data)} hourly records for {ticker_symbol}.")
             if output_filename:
-                data.to_csv(output_filename)
+                # Ensure the index is named 'datetime'
+                data.index.name = 'datetime'
+                # Reset index to make 'datetime' a regular column for cleaning
+                data_to_save = data.reset_index()
+
+                # Filter out rows where 'datetime' column contains 'Ticker' or 'datetime' strings
+                data_to_save = data_to_save[~data_to_save['datetime'].astype(
+                    str).isin(['Ticker', 'datetime'])]
+
+                # Convert 'datetime' column to datetime objects and set as index
+                data_to_save['datetime'] = pd.to_datetime(
+                    data_to_save['datetime'], errors='coerce', utc=True)
+                data_to_save = data_to_save.set_index('datetime')
+                # Save the cleaned DataFrame to CSV with the datetime index
+                data_to_save.to_csv(
+                    output_filename, index=True, index_label='datetime')
                 # print(f"Hourly prices saved to {output_filename}")
-            return data
+            return data_to_save  # Return the cleaned data
         else:
             print(
                 f"No hourly data found for {ticker_symbol} in the specified range/period.")
