@@ -15,8 +15,8 @@ from backtester import strategy, run_backtest  # Import run_backtest
 tickers = ["AAPL", "MSFT", "AMZN", "GOOGL", "META"]
 
 # Define period and interval for hourly data
-period = "30d"  # As specified in the original prompt
-interval = "1h"  # Changed to 1h as 1m has data limitations for yfinance over 7d
+period = "300d"
+interval = "4h"
 
 # Define start and end dates for daily data
 end_date_daily = datetime.now().strftime('%Y-%m-%d')
@@ -24,7 +24,7 @@ start_date_daily = (datetime.now() - timedelta(days=365)
                     ).strftime('%Y-%m-%d')  # Last 1 year
 
 # --- Data Fetching and Initial Processing ---
-print("\n--- fStarting Data Fetching and Initial Processing ---")
+print("\n--- Starting Data Fetching and Initial Processing ---")
 
 # Dictionary to store processed hourly data for each ticker
 all_processed_hourly_data = {}
@@ -171,24 +171,3 @@ if not returns_matrix_Xt.empty:
     # plt.show()
 
     # --- Run Backtest ---
-    # Select the first ticker for backtesting as an example
-    backtest_ticker = tickers[0]
-    backtest_asset_index = 0  # Corresponds to the first ticker in the list
-
-    print(f"\n--- Initiating Backtest for {backtest_ticker} ---")
-
-    # Generate strategy signals for the specific asset for inspection
-    # This is a duplicate call to strategy, but for debugging purposes.
-    # The actual signals passed to run_backtest are generated inside run_backtest.
-    # We need to ensure the signals generated here match what's expected.
-    debug_signals = strategy(
-        returns_matrix_Xt, sparse_component, backtest_asset_index)
-
-    run_backtest(
-        ticker_symbol=backtest_ticker,
-        period=period,
-        interval=interval,
-        returns_matrix=returns_matrix_Xt,
-        sparse_component=sparse_component,
-        asset_index=backtest_asset_index
-    )

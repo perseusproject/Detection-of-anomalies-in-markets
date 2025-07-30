@@ -34,7 +34,7 @@ def perform_pca(matrix: pd.DataFrame, n_components: int = None):
     # Each row of Vt corresponds to a principal component
     principal_components = pd.DataFrame(Vt, columns=matrix.columns)
 
-    # Transformed data (scores) are U * S
+    # Transformed data (scores) are U @ np.diag(S)
     # U has orthogonal columns, S are singular values
     scores = pd.DataFrame(U @ np.diag(S), index=matrix.index)
 
@@ -88,3 +88,28 @@ def robust_pca(matrix: pd.DataFrame, n_components: int = None):
     singular_values = pca.singular_values_
 
     return low_rank_component, sparse_component, singular_values
+
+
+def get_last_n_days_submatrix(matrix: pd.DataFrame, n_days: int, interval: str):
+    """
+    Extracts a submatrix containing only the values from the last n days,
+    considering the data interval.
+
+    Args:
+        matrix (pd.DataFrame): The input matrix (e.g., sparse component).
+        n_days (int): The number of last days to extract.
+        interval (str): The data interval (e.g., "1h", "1d").
+
+    Returns:
+        pd.DataFrame: The submatrix containing values from the last n days.
+    """
+    if interval.endswith('h'):
+        hours_per_interval = int(interval[:-1])
+        rows_per_day = 24 // hours_per_interval
+    elif interval.endswith('d'):
+        rows_per_day = int(interval[:-1])  # Assuming '1d' means 1 row per day
+    else:
+        raise ValueError("Unsupported interval format. Use 'Xh' or 'Xd'.")
+
+    total_rows = n_days * rows_per_day
+    return matrix.tail(total_rows)
