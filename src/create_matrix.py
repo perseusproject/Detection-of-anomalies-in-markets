@@ -1,6 +1,7 @@
 import pandas as pd
 from clean_data import clean_data
 from returns import calculate_log_returns
+from price_downloader import get_hourly_prices  # Import the downloader
 
 
 def create_returns_matrix(tickers, period="30d", interval="1h"):
@@ -16,34 +17,81 @@ def create_returns_matrix(tickers, period="30d", interval="1h"):
 
     for ticker in tickers:
         hourly_file_path = f"price_downloader/{ticker}_hourly_prices.csv"
+        hourly_data = pd.DataFrame()  # Initialize empty DataFrame
+
+        # Check if file exists and has recent data, otherwise download
         try:
-            # Load hourly data
-            hourly_data = pd.read_csv(
-                hourly_file_path, index_col=0, parse_dates=True, date_format='%Y-%m-%d %H:%M:%S')
+            # Attempt to load hourly data, skipping the first 3 rows
+            temp_hourly_data = pd.read_csv(
+                # Read without parsing dates initially
+                hourly_file_path, skiprows=3, header=None)
 
-            # Ensure 'Close' column is numeric
-            if 'Close' in hourly_data.columns:
-                hourly_data['Close'] = pd.to_numeric(
-                    hourly_data['Close'], errors='coerce')
+            # Assign meaningful column names
+            temp_hourly_data.columns = [
+                'Datetime', 'Close', 'High', 'Low', 'Open', 'Volume']
 
-            # Clean data
-            cleaned_hourly_data = clean_data(hourly_data.copy())
+            # Explicitly convert 'Datetime' column to datetime objects and set as index
+            temp_hourly_data['Datetime'] = pd.to_datetime(
+                temp_hourly_data['Datetime'], format='%Y-%m-%d %H:%M:%S%z', errors='coerce')
+            temp_hourly_data = temp_hourly_data.set_index('Datetime').dropna(
+                # Drop rows where Datetime conversion failed or Close is NaN
+                subset=['Close'])
 
-            # Calculate Log-Returns
-            if 'Close' in cleaned_hourly_data.columns:
-                log_returns = calculate_log_returns(
-                    cleaned_hourly_data.copy(), price_column='Close')
-                all_hourly_returns[ticker] = log_returns
+            # Check if the latest data point is recent enough (e.g., within the last 'period' days)
+            period_timedelta = pd.to_timedelta(period)
+
+            if not temp_hourly_data.empty and (pd.Timestamp.now(tz='UTC') - temp_hourly_data.index.max()) < period_timedelta:
+                hourly_data = temp_hourly_data
+                print(f"Using existing recent hourly data for {ticker}.")
             else:
                 print(
-                    f"Warning: 'Close' column not found for {ticker}. Skipping log-return calculation for matrix.")
+                    f"Hourly data for {ticker} is old or empty. Attempting to download new data.")
+                hourly_data = get_hourly_prices(
+                    ticker, period=period, interval=interval, output_filename=hourly_file_path)
 
-        except FileNotFoundError:
+        except (FileNotFoundError, pd.errors.EmptyDataError):
             print(
-                f"Error: Hourly data file not found for {ticker} at {hourly_file_path}. Skipping for matrix creation.")
+                f"Hourly data file not found or empty for {ticker}. Attempting to download new data.")
+            hourly_data = get_hourly_prices(
+                ticker, period=period, interval=interval, output_filename=hourly_file_path)
         except Exception as e:
             print(
-                f"Error loading or processing hourly data for {ticker} for matrix creation: {e}")
+                f"Error loading existing hourly data for {ticker}: {e}. Attempting to download new data.")
+            hourly_data = get_hourly_prices(
+                ticker, period=period, interval=interval, output_filename=hourly_file_path)
+
+            # Debug prints after download attempt
+            print(
+                f"Columns of hourly_data for {ticker} after download: {hourly_data.columns}")
+            print(
+                f"Head of hourly_data for {ticker} after download:\n{hourly_data.head()}")
+
+        if hourly_data.empty:
+            print(
+                f"Could not get hourly data for {ticker}. Skipping for matrix creation.")
+            continue
+
+        # Ensure 'Close' column is numeric after loading or downloading
+        # This check is still necessary as downloaded data might also have issues
+        if 'Close' in hourly_data.columns:
+            hourly_data['Close'] = pd.to_numeric(
+                hourly_data['Close'], errors='coerce')
+        else:
+            print(
+                f"Error: 'Close' column not found in {ticker} data after loading/downloading. Skipping.")
+            continue
+
+        # Clean data
+        cleaned_hourly_data = clean_data(hourly_data.copy())
+
+        # Calculate Log-Returns
+        if 'Close' in cleaned_hourly_data.columns:
+            log_returns = calculate_log_returns(
+                cleaned_hourly_data.copy(), price_column='Close')
+            all_hourly_returns[ticker] = log_returns
+        else:
+            print(
+                f"Warning: 'Close' column not found for {ticker}. Skipping log-return calculation for matrix.")
 
     if not all_hourly_returns:
         print("No hourly returns data available to create the matrix.")

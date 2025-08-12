@@ -9,6 +9,7 @@ from create_matrix import create_returns_matrix
 import matplotlib.pyplot as plt
 import seaborn as sns
 from PCA import perform_pca, robust_pca
+from backtester import strategy, calculate_pnl
 
 
 # Define a list of ticker symbols
@@ -142,5 +143,30 @@ if not returns_matrix_Xt.empty:
     plt.title('Heatmap of Anomalous Elements (Sparse Component)')
     plt.xlabel('Assets')
     plt.ylabel('Time')
+    plt.tight_layout()
+    plt.show()
+
+    # --- Apply Strategy and Plot PnL for each index ---
+    print("\n--- Applying Strategy and Plotting PnL for each index ---")
+    plt.figure(figsize=(14, 10))
+
+    for j, ticker in enumerate(tickers):
+        # Get the returns series for the current ticker
+        returns_series = returns_matrix_Xt.iloc[j]
+
+        # Generate strategy signals
+        strategy_signals = strategy(returns_matrix_Xt, sparse_component, j)
+
+        # Calculate PnL
+        cumulative_pnl = calculate_pnl(returns_series, strategy_signals)
+
+        # Plot PnL
+        plt.plot(cumulative_pnl.index, cumulative_pnl, label=f'{ticker} PnL')
+
+    plt.title('Cumulative PnL for Each Index using Anomaly Detection Strategy')
+    plt.xlabel('Date')
+    plt.ylabel('Cumulative PnL')
+    plt.legend()
+    plt.grid(True)
     plt.tight_layout()
     plt.show()

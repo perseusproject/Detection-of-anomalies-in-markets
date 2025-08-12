@@ -12,10 +12,10 @@ def calculate_log_returns(df, price_column='Close'):
             f"Warning: DataFrame is empty or '{price_column}' column not found for log-return calculation.")
         return pd.Series(dtype='float64')
     # print(f"Calculating log-returns for column '{price_column}'...")
-    df['Log_Returns'] = (df[price_column] / df[price_column].shift(1)
-                         # Use np.log
-                         ).apply(lambda x: pd.NA if pd.isna(x) else np.log(x))
-    return df['Log_Returns']
+    # Calculate ratio, then apply log, and ensure float dtype
+    log_returns = np.log(df[price_column] /
+                         df[price_column].shift(1)).astype(float)
+    return log_returns
 
 
 def normalize_series_rolling_zscore(series, window=10):

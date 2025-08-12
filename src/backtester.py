@@ -24,24 +24,25 @@ def strategy(matrix, sparse_component, j):
     return pd.Series(L, index=matrix.columns, name=f"Strategy_{matrix.index[j]}")
 
 
-# def calculate_pnl(returns_series, strategy_signals):
-#     """
-#     Calculates the Profit and Loss (PnL) based on log returns and strategy signals.
+def calculate_pnl(returns_series, strategy_signals):
+    """
+    Calculates the Profit and Loss (PnL) based on log returns and strategy signals.
 
-#     Args:
-#         returns_series (pd.Series): Series of log returns for an asset.
-#         strategy_signals (pd.Series): Series of trading signals (1 for long, -1 for short, 0 for neutral).
+    Args:
+        returns_series (pd.Series): Series of log returns for an asset.
+        strategy_signals (pd.Series): Series of trading signals (1 for long, -1 for short, 0 for neutral).
 
-#     Returns:
-#         pd.Series: Cumulative PnL.
-#     """
-#     # Ensure signals and returns are aligned by index
-#     aligned_returns, aligned_signals = returns_series.align(
-#         strategy_signals, join='inner')
+    Returns:
+        pd.Series: Cumulative PnL.
+    """
+    # Ensure signals and returns are aligned by index
+    aligned_returns, aligned_signals = returns_series.align(
+        strategy_signals, join='inner')
 
-#     # PnL for each period: signal * return
-#     daily_pnl = aligned_signals * aligned_returns
+    # PnL for each period: signal * return
+    daily_pnl = aligned_signals * aligned_returns - 0.0003 * \
+        len(aligned_signals)  # Subtracting a small transaction cost
 
-#     # Cumulative PnL
-#     cumulative_pnl = daily_pnl.cumsum()
-#     return cumulative_pnl
+    # Cumulative PnL
+    cumulative_pnl = daily_pnl.cumsum()
+    return cumulative_pnl
