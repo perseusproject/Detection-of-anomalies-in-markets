@@ -46,7 +46,7 @@ def perform_pca(matrix: pd.DataFrame, n_components: int = None):
     return principal_components, scores, S
 
 
-def robust_pca(matrix: pd.DataFrame, n_components: int = None):
+def robust_pca(matrix: pd.DataFrame, n_components: int = None, return_model: bool = False):
     """
     Performs robust PCA on a matrix using a robust estimator and splits the matrix into low-rank and sparse components.
 
@@ -54,12 +54,14 @@ def robust_pca(matrix: pd.DataFrame, n_components: int = None):
         matrix (pd.DataFrame): The input matrix (e.g., returns matrix).
         n_components (int, optional): The number of principal components to keep for the low-rank part.
                                        If None, all components are kept.
+        return_model (bool, optional): If True, returns the fitted model components for out-of-sample application.
 
     Returns:
         tuple: A tuple containing:
             - pd.DataFrame: The low-rank component.
             - pd.DataFrame: The sparse component (residuals/anomalies).
             - np.array: The singular values from the PCA of the robustly scaled data.
+            - tuple: (Optional) If return_model=True, returns (scaler, pca) for out-of-sample application.
     """
     # 1. Robustly scale the data
     scaler = RobustScaler()
@@ -87,7 +89,47 @@ def robust_pca(matrix: pd.DataFrame, n_components: int = None):
     # Singular values from the PCA
     singular_values = pca.singular_values_
 
-    return low_rank_component, sparse_component, singular_values
+    if return_model:
+        return low_rank_component, sparse_component, singular_values, (scaler, pca)
+    else:
+        return low_rank_component, sparse_component, singular_values
+
+
+def apply_robust_pca_model(matrix: pd.DataFrame, model_components: tuple):
+    """
+    Applies a pre-trained robust PCA model to new data.
+
+    Args:
+        matrix (pd.DataFrame): New data matrix to transform.
+        model_components (tuple): Tuple containing (scaler, pca) from robust_pca.
+
+    Returns:
+        tuple: A tuple containing:
+            - pd.DataFrame: The low-rank component.
+            - pd.DataFrame: The sparse component (residuals/anomalies).
+    """
+    scaler, pca = model_components
+
+    # Apply the same scaling transformation
+    scaled_matrix_np = scaler.transform(matrix)
+    scaled_matrix = pd.DataFrame(
+        scaled_matrix_np, index=matrix.index, columns=matrix.columns)
+
+    # Transform using the pre-trained PCA
+    scores_scaled_np = pca.transform(scaled_matrix)
+
+    # Reconstruct the low-rank component in the scaled space
+    low_rank_scaled_np = pca.inverse_transform(scores_scaled_np)
+
+    # Inverse transform to get the low-rank component in the original data scale
+    low_rank_component = pd.DataFrame(scaler.inverse_transform(low_rank_scaled_np),
+                                      index=matrix.index,
+                                      columns=matrix.columns)
+
+    # Calculate the sparse component as the residual
+    sparse_component = matrix - low_rank_component
+
+    return low_rank_component, sparse_component
 
 
 def get_last_n_days_submatrix(matrix: pd.DataFrame, n_days: int, interval: str):
