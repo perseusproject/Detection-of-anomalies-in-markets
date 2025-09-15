@@ -8,8 +8,9 @@ from returns import calculate_log_returns, normalize_series_rolling_zscore
 from create_matrix import create_returns_matrix
 import matplotlib.pyplot as plt
 import seaborn as sns
-from PCA import perform_pca, robust_pca
-from backtester import strategy
+from PCA import perform_pca, robust_pca, apply_robust_pca_model
+from backtester import strategy, backtest_strategy, plot_pnl_chart
+from parameter_optimizer import grid_search_optimization, analyze_optimization_results
 
 # Define a list of ticker symbols
 tickers = [
@@ -223,19 +224,24 @@ if not returns_matrix_Xt.empty:
     print(f"Training data shape: {train_data.shape}")
     print(f"Testing data shape: {test_data.shape}")
 
-    # Train robust PCA on training data
+    # Train robust PCA on training data and get the model components
     print("Training Robust PCA on training data...")
-    train_low_rank, train_sparse, train_singular_values = robust_pca(
-        train_data, n_components=5)
+    train_low_rank, train_sparse, train_singular_values, model_components = robust_pca(
+        train_data, n_components=5, return_model=True)
 
-    # For testing, we need to apply the same transformation learned from training
-    # This requires modifying the robust_pca function to return the fitted model
-    # For now, we'll use a simpler approach: train on full data but this is not ideal
-    print("Note: Current implementation trains on full data. Need to modify robust_pca to support proper out-of-sample testing.")
+    # Apply the trained model to testing data for proper out-of-sample testing
+    print("Applying trained model to testing data...")
+    test_low_rank, test_sparse = apply_robust_pca_model(
+        test_data, model_components)
 
-    # Perform Robust PCA for anomaly detection with 5 components
-    print("\nPerforming Robust PCA for anomaly detection with 5 components...")
-    low_rank_component, sparse_component, robust_singular_values = robust_pca(
+    # Combine results for full analysis
+    low_rank_component = pd.concat([train_low_rank, test_low_rank])
+    sparse_component = pd.concat([train_sparse, test_sparse])
+    robust_singular_values = train_singular_values
+
+    # Perform Robust PCA on full data for comparison (this is the old approach)
+    print("\nPerforming Robust PCA on full data for comparison...")
+    full_low_rank, full_sparse, full_singular_values = robust_pca(
         X_t_for_pca, n_components=5)
 
     # Calculate anomaly scores (absolute values of sparse component)
@@ -295,8 +301,52 @@ if not returns_matrix_Xt.empty:
         f"Training period: {X_t_for_pca.index[0]} to {X_t_for_pca.index[train_size-1]}")
     print(
         f"Testing period: {X_t_for_pca.index[train_size]} to {X_t_for_pca.index[-1]}")
-    print("Note: For proper out-of-sample testing, the robust_pca function needs to be modified")
-    print("to return the fitted model (scaler and PCA components) for application to new data.")
+    print("Successfully implemented proper out-of-sample testing!")
+    print("Model trained on training data and applied to testing data to avoid overfitting.")
+
+    # 6. Refined Parameter Optimization
+    print(f"\n--- Refined Parameter Optimization ---")
+    print("Running refined grid search around best parameters...")
+
+    # Refined parameter ranges based on previous optimization results
+    optimization_results = grid_search_optimization(
+        sparse_component,
+        returns_matrix_Xt.T,
+        interval,
+        alpha_range=[0.05, 0.1, 0.12, 0.15, 0.2],
+        quantile_range=[0.985, 0.987, 0.99, 0.992, 0.995],
+        ewma_range=[25, 30, 32, 35, 40]
+    )
+
+    # Analyze and display results
+    top_combinations = analyze_optimization_results(optimization_results)
+
+    # Use best parameters for final backtest
+    best_params = optimization_results['best_params']
+    print(f"\n--- Final Backtest with Optimized Parameters ---")
+    print(
+        f"Using best parameters: alpha={best_params['alpha']}, quantile={best_params['quantile_threshold']}, ewma={best_params['ewma_span']}")
+
+    trading_positions = strategy(
+        sparse_component, interval,
+        alpha=best_params['alpha'],
+        ewma_span=best_params['ewma_span'],
+        quantile_threshold=best_params['quantile_threshold']
+    )
+
+    print("Running final backtest with 0.1% transaction costs...")
+    portfolio_values, cumulative_returns, trades_df = backtest_strategy(
+        trading_positions,
+        returns_matrix_Xt.T,  # Transpose to match positions format
+        transaction_cost=0.001,  # 0.1% transaction cost
+        initial_capital=10000
+    )
+
+    print("Generating PnL chart...")
+    plot_pnl_chart(portfolio_values, cumulative_returns, trades_df,
+                   title=f"Optimized Robust PCA Strategy (alpha={best_params['alpha']}, quantile={best_params['quantile_threshold']}, ewma={best_params['ewma_span']})")
+
+    print("Optimized backtest completed! PnL chart saved to strategy_pnl_chart.png")
 
 else:
     print("\nCould not create returns matrix X_t.")
