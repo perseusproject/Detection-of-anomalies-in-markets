@@ -1,0 +1,8 @@
+{
+  "alpha": 0.05,
+  "quantile_threshold": 0.992,
+  "ewma_span": 30,
+  "sharpe": -3.731607916158366,
+  "return": -0.035197510473025106,
+  "total_trades": 283
+}

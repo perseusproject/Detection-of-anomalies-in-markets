@@ -6,11 +6,13 @@ from price_downloader import get_daily_prices, get_hourly_prices
 from clean_data import clean_data
 from returns import calculate_log_returns, normalize_series_rolling_zscore
 from create_matrix import create_returns_matrix
+from data_manager import get_all_processed_data, get_missing_tickers
 import matplotlib.pyplot as plt
 import seaborn as sns
 from PCA import perform_pca, robust_pca, apply_robust_pca_model
 from backtester import strategy, backtest_strategy, plot_pnl_chart
 from parameter_optimizer import grid_search_optimization, analyze_optimization_results
+from optimized_parameters import get_optimized_parameters, run_parameter_optimization
 
 # Define a list of ticker symbols
 tickers = [
@@ -53,97 +55,15 @@ start_date_daily = (datetime.now() - timedelta(days=365)
 # --- Data Fetching and Initial Processing ---
 print("\n--- Starting Data Fetching and Initial Processing ---")
 
-# Dictionary to store processed hourly data for each ticker
-all_processed_hourly_data = {}
+# Check which tickers need to be fetched
+missing_tickers = get_missing_tickers(tickers)
+if missing_tickers:
+    print(f"Fetching data for missing tickers: {missing_tickers}")
+else:
+    print("All tickers already have processed data. Using cached data.")
 
-for ticker in tickers:
-    print(f"\n--- Processing Data for {ticker} ---")
-
-    # --- Get Daily Prices ---
-    # Daily prices are fetched but not used in subsequent steps for this anomaly detection.
-    # They are saved to CSV by get_daily_prices.
-    daily_data = get_daily_prices(
-        ticker_symbol=ticker,
-        start_date=start_date_daily,
-        end_date=end_date_daily,
-        output_filename=os.path.join(
-            os.getcwd(), "price_downloader", f"{ticker}_daily_prices.csv")
-    )
-    if daily_data.empty:
-        print(
-            f"Warning: No daily data fetched for {ticker}. Skipping daily data processing.")
-
-    # --- Get Hourly Prices ---
-    # get_hourly_prices now returns a cleaned DataFrame directly.
-    hourly_data = get_hourly_prices(
-        ticker_symbol=ticker,
-        period=period,
-        interval=interval,
-        output_filename=os.path.join(
-            os.getcwd(), "price_downloader", f"{ticker}_hourly_prices.csv")
-    )
-
-    if hourly_data.empty:
-        print(
-            f"Warning: No hourly data fetched for {ticker}. Skipping hourly data processing.")
-        continue  # Skip to next ticker if no hourly data
-
-    # print(f"\n--- Processing Hourly Data for {ticker} ---")
-
-    # Flatten MultiIndex columns if present (e.g., from yfinance output)
-    if isinstance(hourly_data.columns, pd.MultiIndex):
-        hourly_data.columns = hourly_data.columns.droplevel(1)
-        hourly_data.columns.name = None  # Remove the MultiIndex name
-
-    # Ensure 'Close' column is numeric
-    if 'Close' in hourly_data.columns:
-        hourly_data['Close'] = pd.to_numeric(
-            hourly_data['Close'], errors='coerce')
-        # Drop rows where 'Close' price is NaN after conversion
-        hourly_data.dropna(subset=['Close'], inplace=True)
-    else:
-        print(
-            f"Warning: 'Close' column not found in raw data for {ticker}. Skipping further processing for this ticker.")
-        continue  # Skip to next ticker if no 'Close' column
-
-    # 1. Cleaning (additional cleaning if needed, get_hourly_prices already does some)
-    # clean_data function can handle further general cleaning like ffill/bfill
-    cleaned_hourly_data = clean_data(hourly_data.copy())
-
-    # 2. Calculate Log-Returns
-    if 'Close' in cleaned_hourly_data.columns:
-        log_returns = calculate_log_returns(
-            cleaned_hourly_data.copy(), price_column='Close')
-        cleaned_hourly_data['Log_Returns'] = log_returns
-    else:
-        print(
-            f"Warning: 'Close' column not found in cleaned data for {ticker}. Skipping log-return calculation.")
-        cleaned_hourly_data['Log_Returns'] = pd.NA
-
-    # 3. Normalization of Log-Returns
-    if 'Log_Returns' in cleaned_hourly_data.columns and not cleaned_hourly_data['Log_Returns'].dropna().empty:
-        normalized_log_returns = normalize_series_rolling_zscore(
-            cleaned_hourly_data['Log_Returns'].dropna(), window=20)
-        cleaned_hourly_data['Normalized_Log_Returns'] = normalized_log_returns
-    else:
-        print(
-            f"Warning: No valid Log_Returns to normalize for {ticker}.")
-        cleaned_hourly_data['Normalized_Log_Returns'] = pd.NA
-
-    # Make the index timezone-naive before saving and passing to other functions
-    if cleaned_hourly_data.index.tz is not None:
-        cleaned_hourly_data.index = cleaned_hourly_data.index.tz_localize(None)
-
-    # Save processed data
-    processed_output_filename = f"price_downloader/{ticker}_processed_hourly_prices.csv"
-    # Ensure the index is named 'datetime' and save it with that label
-    cleaned_hourly_data.index.name = 'datetime'
-    cleaned_hourly_data.to_csv(
-        processed_output_filename, index_label='datetime')
-    # print(f"Processed hourly data saved to {processed_output_filename}")
-
-    # Store processed data for matrix creation
-    all_processed_hourly_data[ticker] = cleaned_hourly_data
+# Get all processed data efficiently (only fetches missing tickers)
+all_processed_hourly_data = get_all_processed_data(tickers, period, interval)
 
 print("\n--- All Data Fetching and Initial Processing Complete ---")
 
@@ -304,28 +224,20 @@ if not returns_matrix_Xt.empty:
     print("Successfully implemented proper out-of-sample testing!")
     print("Model trained on training data and applied to testing data to avoid overfitting.")
 
-    # 6. Refined Parameter Optimization
-    print(f"\n--- Refined Parameter Optimization ---")
-    print("Running refined grid search around best parameters...")
+    # 6. Run Parameter Optimization
+    print(f"\n--- Running Parameter Optimization ---")
+    print("Finding optimal parameter combination with trade constraints...")
 
-    # Refined parameter ranges based on previous optimization results
-    optimization_results = grid_search_optimization(
+    # Run optimization to find the best parameters
+    best_params = run_parameter_optimization(
         sparse_component,
         returns_matrix_Xt.T,
-        interval,
-        alpha_range=[0.05, 0.1, 0.12, 0.15, 0.2],
-        quantile_range=[0.985, 0.987, 0.99, 0.992, 0.995],
-        ewma_range=[25, 30, 32, 35, 40]
+        interval
     )
 
-    # Analyze and display results
-    top_combinations = analyze_optimization_results(optimization_results)
-
-    # Use best parameters for final backtest
-    best_params = optimization_results['best_params']
-    print(f"\n--- Final Backtest with Optimized Parameters ---")
     print(
-        f"Using best parameters: alpha={best_params['alpha']}, quantile={best_params['quantile_threshold']}, ewma={best_params['ewma_span']}")
+        f"Optimal parameters found: alpha={best_params['alpha']}, quantile={best_params['quantile_threshold']}, ewma={best_params['ewma_span']}")
+    print(f"Total trades generated: {best_params.get('total_trades', 'N/A')}")
 
     trading_positions = strategy(
         sparse_component, interval,

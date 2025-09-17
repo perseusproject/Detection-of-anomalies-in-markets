@@ -128,9 +128,10 @@ def optimize_parameters(sparse_component, returns_matrix, interval,
 
 
 def grid_search_optimization(sparse_component, returns_matrix, interval,
-                             alpha_range=[0.1, 0.2, 0.3, 0.4, 0.5],
-                             quantile_range=[0.95, 0.96, 0.97, 0.98, 0.99],
-                             ewma_range=[10, 15, 20, 25, 30]):
+                             alpha_range=[0.05, 0.1, 0.15, 0.2, 0.25],
+                             quantile_range=[0.97, 0.98, 0.985, 0.99, 0.992],
+                             ewma_range=[15, 20, 25, 30, 35],
+                             min_trades_threshold=5):
     """
     Simple grid search optimization (faster but less robust than CV)
     """
@@ -153,6 +154,13 @@ def grid_search_optimization(sparse_component, returns_matrix, interval,
                 ewma_span=ewma_span,
                 quantile_threshold=quantile_threshold
             )
+
+            # Count number of trades (non-zero positions)
+            total_trades = (positions != 0).sum().sum()
+
+            # Skip parameter sets with too few trades
+            if total_trades < min_trades_threshold:
+                continue
 
             # Backtest
             portfolio_values, cumulative_returns, trades_df = backtest_strategy(
@@ -177,7 +185,8 @@ def grid_search_optimization(sparse_component, returns_matrix, interval,
                 'ewma_span': ewma_span,
                 'sharpe': sharpe_ratio,
                 'total_return': total_return,
-                'volatility': volatility if 'volatility' in locals() else 0
+                'volatility': volatility if 'volatility' in locals() else 0,
+                'total_trades': total_trades
             })
 
             if sharpe_ratio > best_sharpe:
@@ -187,7 +196,8 @@ def grid_search_optimization(sparse_component, returns_matrix, interval,
                     'quantile_threshold': quantile_threshold,
                     'ewma_span': ewma_span,
                     'sharpe': sharpe_ratio,
-                    'return': total_return
+                    'return': total_return,
+                    'total_trades': total_trades
                 }
 
         except Exception as e:
@@ -216,13 +226,14 @@ def analyze_optimization_results(results):
         f"Best parameters: alpha={best_params['alpha']}, quantile={best_params['quantile_threshold']}, ewma={best_params['ewma_span']}")
     print(f"Best Sharpe ratio: {best_params['sharpe']:.4f}")
     print(f"Best return: {best_params['return']:.2%}")
+    print(f"Total trades: {best_params.get('total_trades', 'N/A')}")
 
-    # Top 10 parameter combinations
+    # Top 10 parameter combinations (include trade count)
     top_10 = results_df.nlargest(10, 'sharpe')
     print("\nTop 10 parameter combinations:")
     for i, (_, row) in enumerate(top_10.iterrows(), 1):
         print(f"{i}. alpha={row['alpha']}, quantile={row['quantile_threshold']}, ewma={row['ewma_span']}: "
-              f"Sharpe={row['sharpe']:.4f}, Return={row['total_return']:.2%}")
+              f"Sharpe={row['sharpe']:.4f}, Return={row['total_return']:.2%}, Trades={row.get('total_trades', 'N/A')}")
 
     return top_10
 

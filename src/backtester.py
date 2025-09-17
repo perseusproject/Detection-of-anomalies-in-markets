@@ -87,11 +87,25 @@ def strategy(sparse_component, interval, alpha=0.2, ewma_span=20, quantile_thres
             # Generate trading signal
             current_anomaly = abs(asset_sparse_component.iloc[T])
             if current_anomaly > threshold:
-                # Invert the signal: positive anomaly suggests short, negative suggests long
-                # This is because unusually high returns may indicate overbought conditions
-                # and unusually low returns may indicate oversold conditions
-                position_size = -alpha * \
+                # Test both contrarian and momentum approaches
+                # Contrarian: invert the signal (reversion hypothesis)
+                # Momentum: follow the signal (persistence hypothesis)
+
+                # For now, use contrarian approach but track both for analysis
+                contrarian_size = -alpha * \
                     asset_sparse_component.iloc[T] / threshold
+                momentum_size = alpha * \
+                    asset_sparse_component.iloc[T] / threshold
+
+                # Use contrarian approach (original logic)
+                position_size = contrarian_size
+
+                # Debug: track both approaches for analysis
+                if current_anomaly > 0.01:  # Only show significant anomalies
+                    print(
+                        f"TRADE: {asset_ticker} at T={T}, anomaly={current_anomaly:.6f}, threshold={threshold:.6f}")
+                    print(
+                        f"  Contrarian position: {contrarian_size:.4f}, Momentum position: {momentum_size:.4f}")
 
                 # Clip position size to avoid over-leverage (max 20% per asset)
                 max_position = 0.2  # Maximum 20% allocation per asset
@@ -262,9 +276,18 @@ def plot_pnl_chart(portfolio_values, cumulative_returns, trades_df, title="Strat
 
     # Print performance statistics
     total_return = cumulative_returns.iloc[-1]
-    annualized_return = (1 + total_return) ** (252 /
-                                               len(cumulative_returns)) - 1
-    volatility = trades_df['net_returns'].std() * np.sqrt(252)
+
+    # Correct annualization based on data frequency (hourly data)
+    if len(cumulative_returns) > 1:
+        # For hourly data: 24 hours/day * 252 trading days = 6048 periods/year
+        periods_per_year = 24 * 252
+        annualized_return = (
+            1 + total_return) ** (periods_per_year / len(cumulative_returns)) - 1
+        volatility = trades_df['net_returns'].std() * np.sqrt(periods_per_year)
+    else:
+        annualized_return = 0
+        volatility = 0
+
     sharpe_ratio = annualized_return / volatility if volatility > 0 else 0
 
     print(f"\n--- Strategy Performance Statistics ---")
@@ -276,6 +299,17 @@ def plot_pnl_chart(portfolio_values, cumulative_returns, trades_df, title="Strat
     print(
         f"Maximum Drawdown: {calculate_max_drawdown(cumulative_returns):.2%}")
     print(f"Transaction Costs: ${trades_df['transaction_costs'].sum():.2f}")
+
+    # Additional analysis for leveraged products (removed since leveraged products were removed)
+    # leveraged_tickers = ['TECL', 'FANG', 'ARKK']
+    # leveraged_positions = positions[leveraged_tickers].mean().abs(
+    # ) if leveraged_tickers[0] in positions.columns else pd.Series()
+    # if not leveraged_positions.empty:
+    #     print(f"\n--- Leveraged Products Analysis ---")
+    #     print(f"Average absolute position sizes for leveraged products:")
+    #     for ticker, pos in leveraged_positions.items():
+    #         print(f"  {ticker}: {pos:.4f}")
+    #     print(f"Total leveraged exposure: {leveraged_positions.sum():.4f}")
 
 
 def calculate_max_drawdown(cumulative_returns):
